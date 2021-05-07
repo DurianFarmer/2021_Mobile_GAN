@@ -5,11 +5,7 @@ import tensorflow_datasets as tfds
 
 import matplotlib.pyplot as plt
 import numpy as np
-import random
 
-import argparse
-
-# 비복원 추출 방법: Label을 먼저 shuffel하고 sequential 하게 data 가져오기
 
 class Dataset:
     def __init__(self, dataset_name='omniglot'):
@@ -20,7 +16,7 @@ class Dataset:
         def extraction(image, label):
             image = tf.image.convert_image_dtype(image, tf.float32)
             image = tf.image.rgb_to_grayscale(image)
-            image = tf.image.resize(image, [28, 28])
+            image = tf.image.resize(image, [32, 32])
             return image, label
 
         for image, label in ds_train.map(extraction):
@@ -35,7 +31,7 @@ class Dataset:
         def extraction(image, label):
             image = tf.image.convert_image_dtype(image, tf.float32)
             image = tf.image.rgb_to_grayscale(image)
-            image = tf.image.resize(image, [28, 28])
+            image = tf.image.resize(image, [32, 32])
             return image, label
         
         for image, label in self.ds_test.map(extraction):
@@ -47,7 +43,7 @@ class Dataset:
         self.test_labels = list(self.test_data.keys())
         
     def shuffle_labels(self):
-        self.labels = np.random.shuffle(self.labels)
+        np.random.shuffle(self.labels)
 
     def get_mini_dataset(self, label_idx, batch_size=20):
         #random_label = self.labels[random.randint(0, len(self.labels)-1)]
@@ -68,7 +64,7 @@ class Dataset:
     Define GAN model
 """
 
-def define_discriminator(in_shape=(28,28,1)):
+def define_discriminator(in_shape=(32, 32, 1)):
     model = keras.Sequential([
         layers.Conv2D(64, (3, 3), strides=(2,2), padding='same', input_shape=in_shape),
         layers.LeakyReLU(alpha=0.2),
@@ -84,15 +80,15 @@ def define_discriminator(in_shape=(28,28,1)):
     return model
 
 def define_generator(input_dim):
-    n_nodes = 128 * 7 * 7 # foundation for 7x7 image
+    n_nodes = 128 * 8 * 8 # foundation for 8x8 image
     model = keras.Sequential([
         layers.Dense(n_nodes, input_dim=input_dim),
         layers.LeakyReLU(alpha=0.2),
-        layers.Reshape((7,7,128)),
-        # Upsample to 14x14
+        layers.Reshape((8,8,128)),
+        # Upsample to 16x16
         layers.Conv2DTranspose(128, (4,4), strides=(2,2), padding='same'),
         layers.LeakyReLU(alpha=0.2),
-        # Upsample to 28x28
+        # Upsample to 32x32
         layers.Conv2DTranspose(128, (4,4), strides=(2,2), padding='same'),
         layers.LeakyReLU(alpha=0.2),
         layers.Conv2D(1, (7,7), activation='sigmoid', padding='same')
@@ -149,11 +145,24 @@ def generate_train_samples(latent_dim, n_samples):
 """
 
 def save_plot(examples, epoch, n=4):
-    for i in range(n*n):
-        plt.subplot(n, n, 1 + i)
+    for i in range(n):
+        plt.subplot(1, n, 1 + i)
         plt.axis('off')
         plt.imshow(examples[i, :, :, 0], cmap='gray_r')
     filename='img/generated_plot_e%03d.png'%(epoch+1)
+    plt.savefig(filename)
+    plt.close()
+
+def compare_plot(real_examples, fake_examples, epoch, n_samples):
+    for i in range(2):
+        for j in range(n_samples):
+            plt.subplot(2, n_samples, 1 + i + j)
+            plt.axis('off')
+            if i == 0:
+                plt.imshow(real_examples[j, :, :, 0], cmap='gray_r')
+            elif i == 1:
+                plt.imshow(fake_examples[j, :, :, 0], cmap='gray_r')
+    filename='img/compare_plot_e%03d.png'%(epoch+1)
     plt.savefig(filename)
     plt.close()
     
@@ -180,10 +189,13 @@ def summarize_performance(epoch, g_model, d_model, gan_model, dataset, latent_di
     
     x_input = generate_latent_points(latent_dim, n_samples)
     X_fake = g_model(x_input)
-    
-    save_plot(X_fake, epoch)
-    filename='model/generator_model_%03d.h5' % (epoch+1)
-    g_model.save(filename)
+    X_real = dataset.get_mini_dataset(0, n_samples)
+
+    compare_plot(X_real, X_fake, epoch)
+    filename_g='model/generator_model_%03d.h5' % (epoch+1)
+    filename_d='model/discriminator_model_%03d.h5' % (epoch+1)
+    g_model.save(filename_g)
+    d_model.save(filename_d)
 
 """
     Define training functions
@@ -218,8 +230,10 @@ def reptile_train(g_model, d_model, gan_model,
     opt_g = keras.optimizers.Adam(learning_rate=meta_step_size)
     opt_d = keras.optimizers.Adam(learning_rate=meta_step_size)
     
+    # How many epochs the model should train for
     for i in range(n_epochs):
-        for j in range(500):
+        # On how many labels/classes the model should be optimized on per epoch
+        for j in range(501):
             # Make a copy of phi_generator and phi_discriminator
             phi_g = g_model.get_weights()
             phi_d = d_model.get_weights()
@@ -234,22 +248,30 @@ def reptile_train(g_model, d_model, gan_model,
             d_weights = d_model.get_weights()
             d_model.set_weights(d_weights)
 
-
+            # Calculate weight difference between optimized weights and original weights
             g_grads = weight_difference(g_weights, phi_g)
             d_grads = weight_difference(d_weights, phi_d)
 
             opt_g.apply_gradients(zip(g_grads, g_model.trainable_weights))
             opt_d.apply_gradients(zip(d_grads, d_model.trainable_weights))
+
         dataset.shuffle_labels()
 
         if (i + 1) % 10 == 0:
             summarize_performance(i+1, g_model, d_model, gan_model, dataset, latent_dim, n_samples)
 
 def main():
+    # Tensorflow GPU settings
+    gpu_num = 2
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        tf.config.experimental.set_visible_devices(gpus[gpu_num], 'GPU')
+        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
+
     dataset = Dataset()
 
     latent_dim=100
-    n_samples=20
+    n_samples=5
     epochs=200
 
 
