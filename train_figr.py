@@ -156,7 +156,7 @@ def save_plot(examples, epoch, n=4):
 def compare_plot(real_examples, fake_examples, epoch, n_samples):
     for i in range(2):
         for j in range(n_samples):
-            plt.subplot(2, n_samples, 1 + i + j)
+            plt.subplot(2, n_samples, 1 + (i*n_samples) + j)
             plt.axis('off')
             if i == 0:
                 plt.imshow(real_examples[j, :, :, 0], cmap='gray_r')
@@ -191,7 +191,7 @@ def summarize_performance(epoch, g_model, d_model, gan_model, dataset, latent_di
     X_fake = g_model(x_input)
     X_real = dataset.get_mini_dataset(0, n_samples)
 
-    compare_plot(X_real, X_fake, epoch)
+    compare_plot(X_real, X_fake, epoch, n_samples)
     filename_g='model/generator_model_%03d.h5' % (epoch+1)
     filename_d='model/discriminator_model_%03d.h5' % (epoch+1)
     g_model.save(filename_g)
@@ -262,11 +262,11 @@ def reptile_train(g_model, d_model, gan_model,
 
 def main():
     # Tensorflow GPU settings
-    gpu_num = 2
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    if gpus:
-        tf.config.experimental.set_visible_devices(gpus[gpu_num], 'GPU')
-        tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
+    #gpu_num = 0
+    #gpus = tf.config.experimental.list_physical_devices('GPU')
+    #if gpus:
+    #    tf.config.experimental.set_visible_devices(gpus[gpu_num], 'GPU')
+    #    tf.config.experimental.set_memory_growth(gpus[gpu_num], True)
 
     dataset = Dataset()
 
